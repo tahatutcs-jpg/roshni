@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Admin</title><link rel="stylesheet" href="/assets/style.css"></head>
+<body class="adm"><div class="w" id="a"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="/config.js"></script>
+<script>
+const sb=supabase.createClient(CFG.url,CFG.key),$=s=>document.querySelector(s),A=$('#a');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const F={project:[['title','Title'],['location','Location'],['goal','Goal (PKR)','number'],['raised','Raised so far (PKR)','number'],['summary','Short summary','area'],['body','Full story','area']],
+event:[['title','Title'],['event_date','Date','date'],['event_time','Time'],['location','Venue'],['summary','Short summary','area'],['body','Details','area']],
+service:[['title','Title'],['icon','Emoji icon'],['summary','Short summary','area'],['body','Details','area']]};
+const TABS={project:'Projects',event:'Events',service:'Services',messages:'Messages'};
+let tab='project',ed=null,note='',L=[];
+function login(){A.innerHTML=`<h2>Admin sign in</h2><form class="fm"    onsubmit="go(this);return false"><label>Email<input name="e" type="email" required></label><label>Password<input name="p" type="password" required></label><button class="btn g">Sign in</button><p id="n"></p></form>`}
+async function go(f){const{error}=await sb.auth.signInWithPassword({email:f.e.value,password:f.p.value});if(error)   $('#n').textContent=error.message;else draw();return false}
+async function draw(){const{data:{session}}=await sb.auth.getSession();if(!session)return login();let b='';
+if(ed)b=form();
+else if(tab=='messages'){const{data}=await sb.from('messages').select('*').order('created_at',{ascending:false});b=(data||[]).map(m=>`<div class="row"><b>${esc(m.name)}, ${esc(m.phone)}<br><small>${esc(m.topic)}: ${esc(m.message)}</small></b><button onclick="dm('${m.id}')">Delete</button></div>`).join('')||'<p>No messages yet.</p>'}
+else{const{data}=await sb.from('items').select('*').eq('kind',tab).order('created_at',{ascending:false});L=data||[];b=`<button class="btn g" onclick="edit(-1)">Add ${tab}</button><div style="margin-top:16px">${L.map((x,i)=>`<div class="row"><div class="t" style="${x.images?.[0]?`background-image:url(${esc(x.images[0])})`:''}">${x.images?.[0]?'':esc(x.icon||'')}</div><b>${esc(x.title)}</b><button onclick="edit(${i})">Edit</button><button onclick="del(${i})">Delete</button></div>`).join('')||'<p>Nothing here yet. Add your first one.</p>'}</div>`}
+A.innerHTML=`<div class="ah"><h2>Admin</h2><div>${Object.entries(TABS).map(([k,v])=>`<button class="tb ${k==tab?'on':''}" onclick="tab='${k}';ed=null;draw()">${v}</button>`).join(' ')}</div><div><a href="/" target="_blank">View site</a> <button class="tb" onclick="out()">Sign out</button></div></div><p id="n">${note}</p>${b}`;note=''}
+function edit(i){ed=i<0?{kind:tab,images:[],gone:[]}:{...L[i],images:[...(L[i].images||[])],gone:[]};draw()}
+function form(){return`<form class="fm" onsubmit="return false"><h3>${ed.id?'Edit':'Add'} ${ed.kind}</h3>`+F[ed.kind].map(([k,l,t])=>`<label>${l}${t=='area'?`<textarea data-f="${k}">${esc(ed[k])}</textarea>`:`<input data-f="${k}" type="${t||'text'}" value="${esc(ed[k])}">`}</label>`).join('')+`<label>Photos</label><div class="im">${ed.images.map((u,j)=>`<div class="th" style="background-image:url(${esc(u)})"><button type="button" onclick="rm(${j})" aria-label="Remove photo">✕</button></div>`).join('')}<label class="up">Add photos<input type="file" accept="image/*" multiple hidden onchange="upl(this)"></label></div><div><button class="btn g" type="button" onclick="save()">Save</button> <button class="tb" type="button" onclick="ed=null;draw()">Cancel</button></div></form>`}
+function sync(){document.querySelectorAll('[data-f]').forEach(e=>ed[e.dataset.f]=e.value)}
+async function upl(el){sync();let bad=0;for(const f of el.files){const p=crypto.randomUUID()+'-'+f.name.replace(/[^\w.-]/g,'_');const{error}=await sb.storage.from('media').upload(p,f);if(error){note='Upload failed: '+error.message;bad=1;break}ed.images.push(sb.storage.from('media').getPublicUrl(p).data.publicUrl)}if(!bad)note='';draw()}
+function rm(j){sync();ed.gone.push(ed.images.splice(j,1)[0]);draw()}
+const sp=u=>u.split('/media/')[1];
+async function save(){sync();if(!ed.title)return $('#n').textContent='Please add a title.';
+const row={kind:ed.kind,title:ed.title,summary:ed.summary,body:ed.body,location:ed.location,icon:ed.icon,event_time:ed.event_time,event_date:ed.event_date||null,goal:+ed.goal||0,raised:+ed.raised||0,images:ed.images};
+const r=ed.id?await sb.from('items').update(row).eq('id',ed.id).select():await sb.from('items').insert(row);const error=r.error||(ed.id&&!r.data?.length?{message:'Not allowed. Your login email does not match the admin email.'}:null);
+if(error)return $('#n').textContent='Could not save: '+error.message;
+if(ed.gone.length)await sb.storage.from('media').remove(ed.gone.map(sp));ed=null;note='Saved.';draw()}
+async function del(i){const x=L[i];if(!confirm('Delete "'+x.title+'"?'))return;await sb.from('items').delete().eq('id',x.id);if(x.images?.length)await sb.storage.from('media').remove(x.images.map(sp));draw()}
+async function dm(id){await sb.from('messages').delete().eq('id',id);draw()}
+async function out(){await sb.auth.signOut();draw()}
+draw();
+</script></body></html>
